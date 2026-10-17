@@ -1,27 +1,234 @@
-# Expense API PoC 仕様案（DRAFT・未承認）
+# Expense API PoC 仕様案（DRAFT・正式固定は未承認）
 
-根拠: my-projects/research/auth-learning/poc-preparation-2026-10-17.md、poc-preparation-next-session.md。元決定・部署の明示承認・レビュー補足・新提案を区別し、実装や実測の成功を主張しない。
+改訂: 2026-10-17（JST）。レビュー対象の旧版は `b297e727d5087d71b26a6ea1f4eca4cf226f44c4`。本書と[調査受入条件案](investigation-acceptance-draft.md)を一組としてレビューする。コード・migration・依存導入・実測は未実施、受入試験はすべて **NOT_RUN**。
 
-## API
-GET /expenses/{id}。IDは ^R-[0-9]{4,12}$、必要scopeは expenses:read。成功JSONは id,ownerId,amountMinor,currency,status の5項目のみ。処理順: 認証→scope→（非GETは405）→利用者確認→ID形式→現在のtenantで限定した申請取得→業務認可→200。401は未認証とBearer challenge、403はscope不足/無効・未登録利用者/非対応主体、400は不正ID、404は不存在/別tenant/閲覧対象外、503はD1依存障害。公開healthなし、未知route404、保護応答no-store。
+## 0. 根拠・承認状態・固定方法
 
-レビュー補足案（未承認）: 一般例外500、405 Allow: GET、HEAD本文なし、エラーJSONは {"error":{"code":"…","requestId":"…"}}、同じサーバー生成requestIdをX-Request-Idと非秘密ログに使用し、入力requestIdを採用しない。具体的code案は AUTHENTICATION_REQUIRED、INSUFFICIENT_SCOPE、USER_NOT_ELIGIBLE、PRINCIPAL_NOT_SUPPORTED、INVALID_EXPENSE_ID、EXPENSE_NOT_FOUND、ROUTE_NOT_FOUND、METHOD_NOT_ALLOWED、DEPENDENCY_UNAVAILABLE、INTERNAL_ERROR。非GETは認証・scope後、D1前に終了。全route共通finalizer、未デコードIDの形式検証、取得行破損500は今回の具体化案であり固定前に確認する。
+根拠は `adeliep87/my-projects` の `5ef2793fb1d46c37aa18f4a1d50303739551ce46` にある、[最新引き継ぎ](https://github.com/adeliep87/my-projects/blob/5ef2793fb1d46c37aa18f4a1d50303739551ce46/research/auth-learning/poc-preparation-next-session.md)、[元の準備記録](https://github.com/adeliep87/my-projects/blob/5ef2793fb1d46c37aa18f4a1d50303739551ce46/research/auth-learning/poc-preparation-2026-10-17.md) §2〜§4・§7、[境界確認記録](https://github.com/adeliep87/my-projects/blob/5ef2793fb1d46c37aa18f4a1d50303739551ce46/research/auth-learning/poc-preparation-boundary-check-2026-10-17.md)。今回の本人指示はこれらを維持し、文書レビューと補正を行うもの。
 
-## 認証境界
-テスト専用アダプター出力は issuer,subject,scopes,kind(user/service)。D1 usersの現在の user_id,tenant_id,role,department,active を要求ごとに取得し、認証データや任意ヘッダーで上書きしない。(issuer,subject)の組で内部利用者を解決し、subjectやemailだけで結合しない。通常Worker入口は常に認証を拒否し、fake Bearer/任意主体ヘッダーでも401。成功経路は隔離したテスト専用entrypointで注入し、通常bundleへfakeを混入させない。実Token暗号検証や実IdP接続は範囲外。
+| 区分 | 内容 | この改訂での扱い |
+|---|---|---|
+| 元の決定 | GET契約、判定順、非GETの早期405、HEAD本文なし、scope、返却5項目、業務認可、D1の3保証、ローカル範囲 | 維持。再選択しない |
+| 本人の追加明示承認 | MANAGER現在部署と申請保存部署の比較、所有者の異動では既存申請部署を変更しない | 維持。自己申請に同部署条件を追加しない |
+| 以前のレビュー補足 | 一般例外500、Allow、requestIdの配置と対応、通常条件の認証後経路 | 仕様案へ統合。理解確認の正答を正式承認にしない |
+| 今回の具体化案 | route境界・未デコードID、共通finalizer、各code/ヘッダー、破損行の500、usersの具体的キー、fixture・受入詳細 | 下記A1〜A5の承認待ち |
+| 調査時の実装選択 | DDLの記法、テスト専用entrypoint/auxiliary Worker、初期化・artifact検査・fault注入の方式、依存版 | 固定した要件の下で調査。未測定の方式や版を採用済みとしない |
 
-## 認可表
-| 閲覧者 | 自分の申請（全3状態） | 他人の同部署PENDING | 他人の同部署APPROVED/REJECTED | 他人の別部署 |
-|---|---|---|---|---|
-| EMPLOYEE | 許可 | 拒否 | 拒否 | 拒否 |
-| MANAGER | 許可 | 許可 | 拒否 | 拒否 |
+### 正式固定前の承認項目
 
-同tenant・有効user・必要scopeが前提。別tenantは404。未知RoleやADMINへ追加権限を与えない。**明示承認済み部署ルール**: MANAGERの現在のusers.departmentと申請時保存のexpenses.departmentを比較。所有者の異動だけで既存申請部署を変更しない。自分の申請に同部署条件を追加しない。
+| ID | 承認対象の案 | 参照 |
+|---|---|---|
+| A1 | 未知routeと保護routeの境界、未デコードID、末尾slash・queryの扱い | §1 |
+| A2 | エラーコードと応答JSON/headers、全route共通finalizer、主体/行破損/例外の分類 | §2〜§3 |
+| A3 | users全体PK・複合UNIQUE、複合FKのRESTRICT、保存型を含む具体的DB制約 | §5 |
+| A4 | 完全なfixture、認可表との対応、独立した具体的HTTP/JSON/DB期待値 | 受入条件案§2〜§6 |
+| A5 | L1〜L4の必須範囲、設定・artifact照合、障害注入、DB不変性、ログと再現性の合格条件 | 受入条件案§1・§7〜§10 |
 
-## D1制約案
-users/expensesの2表、生SQL。users UNIQUE(issuer,subject)、expenses PRIMARY KEY(tenant_id,id)、expenses(tenant_id,owner_id)からusers(tenant_id,user_id)への同tenant複合FK。usersの全体user_id PKと複合UNIQUEは具体化案。必須列NOT NULL、role EMPLOYEE/MANAGER、active 0/1、status PENDING/APPROVED/REJECTED、currency JPY、amount_minorは0〜9007199254740991の整数。FKのRESTRICT動作・SQLite保存型をlocal D1で未検証。tenant限定SELECT（他tenantの読出し防止）と所有者FK（不正な保存防止）は別々の受入条件。
+A1〜A5は未承認。本書の現在の提案を一つ選ぶことと、技術採用・API本体移行・コード実装の指示は別。
 
-## 範囲・工程
-services/expense-api/、npm単独＋package-lock。Workers/Hono/D1/Vitestは評価候補であり採用未決。ローカル・架空データのみ。実IdP、実Token検証、BFF、Native、承認/更新API、クラウド公開、remote D1、refs/tmp/変更は除外。
+正式固定時は、この2文書を含む**対象commitの完全SHA**、本人の明示承認原文または所在、承認日時（JST）、承認したA番号・節、除外/保留、残る未確認事項を記録する。承認は対象commitの内容に結び付け、承認記録を追記した次commitから元commitを参照する。未承認欄を自動で埋めない。承認後の意味変更は差分と影響ケースを示して再レビューする。
 
-仕様・受入条件の固定→追加調査Issue→独立ブランチでローカル実測→別セッション・別モデルの独立レビュー→PR→Issue #3で所有者の採用判断。HTTP理解確認Q1〜Q20は終了済み、正式Session番号は変更しない。
+現在: 対象版の正式固定 **未承認**／本人承認原文 **なし**／試験 **NOT_RUN**／技術採用 **未決**。
+
+## 1. 対象APIとroute境界
+
+### 1.1 維持する決定
+
+- GET `/expenses/{id}`。必要scopeの設定値は `expenses:read`。
+- ID全体が `^R-[0-9]{4,12}$` に一致する。先頭0を許可し、文字列として扱う。
+- 公開healthは作らない。未知routeは404。
+- 保護routeの非GETは認証→scopeを通過した後に405。HEADもこの対象で、全最終応答の本文を空にする。
+- 成功JSONは `id, ownerId, amountMinor, currency, status` の5項目だけ。
+
+### 1.2 route具体化案（A1）
+
+Workerへ届いたRequestのURLの**pathname**を基準に、`/expenses/`の後ろに空でない単一segmentだけがある形を保護routeとする。route識別ではIDの正規表現を使わず、ID形式の検査は利用者確認の後に行う。route識別自体は認証・D1を呼ばない。
+
+segmentはpercent-decodeせずにID検査する。Frameworkがdecodeしたroute parameterをそのまま使う方式は本案に一致しない。percent encodingを別名として許可しない方針であり、URI一般の規則だとは主張しない。
+
+| pathnameの例 | route区分 | 認証・scope・有効user通過後のGET |
+|---|---|---|
+| `/expenses/R-1001` | 保護route | tenant限定取得・認可へ |
+| `/expenses/R-123`、`/expenses/abc` | 保護route | 400 INVALID_EXPENSE_ID |
+| `/expenses/%52-1001`、`/expenses/R%2D1001` | 保護route | 400（decodeしない） |
+| `/expenses/R-1001%2Fextra`、`/expenses/%ZZ` | 保護routeとしてRequestに到達した場合 | 400 |
+| `/expenses`、`/expenses/`、`/expenses/R-1001/` | 未知route | 404 ROUTE_NOT_FOUND |
+| `/expenses/R-1001/extra`、`/Expenses/R-1001`、`/health` | 未知route | 404 ROUTE_NOT_FOUND |
+
+末尾slashのredirect・自動補正はしない。未知routeはmethod・認証情報の有無によらず404、HEADなら本文なし。queryはroute/ID/認証/権限の情報源にせず、このPoCでは無視する。`?tenant_id=T2`等でもtenantは変わらない。
+
+この契約はRequestとしてWorkerへ到達した範囲を対象とする。URLのdot segment等がクライアントやruntimeで事前正規化される場合、送信文字列と実際のpathnameを区別して記録する。到達前の不正HTTP/URL拒否を、このAPIの400/404観測へ換算しない。
+
+## 2. 判定順とエラー分類
+
+以下は元の順序を具体化した固定候補（A2）。開始時にサーバーでrequestIdを生成し、各終了結果を§3の共通処理へ渡す。後続段階は実行しない。
+
+| 順 | 判定 | 終了する条件 | status / error.code |
+|---:|---|---|---|
+| 0 | route | §1の保護routeでない | 404 / ROUTE_NOT_FOUND |
+| 1 | 認証アダプター | 未認証 | 401 / AUTHENTICATION_REQUIRED |
+| 1 | 認証結果の構造 | 結果種別・成功結果の必須型・kindが不正 | 500 / INTERNAL_ERROR |
+| 2 | scope | 必要scopeの完全一致要素なし | 403 / INSUFFICIENT_SCOPE |
+| 3 | 元のHTTP method | GET以外 | 405 / METHOD_NOT_ALLOWED |
+| 4 | 主体種別 | kind=service | 403 / PRINCIPAL_NOT_SUPPORTED |
+| 5 | usersを(issuer,subject)で取得 | D1可用性障害 | 503 / DEPENDENCY_UNAVAILABLE |
+| 5 | usersの結果 | 0行（未登録） | 403 / USER_NOT_ELIGIBLE |
+| 5 | 取得行の整合性 | 不正な型/必須値/role、複数行等 | 500 / INTERNAL_ERROR |
+| 5 | 正常なuser行の資格 | active=0 | 403 / USER_NOT_ELIGIBLE |
+| 6 | 未デコードID | 形式不正 | 400 / INVALID_EXPENSE_ID |
+| 7 | expensesを現在tenantとidで限定取得 | D1可用性障害 | 503 / DEPENDENCY_UNAVAILABLE |
+| 7 | expensesの結果 | 0行 | 404 / EXPENSE_NOT_FOUND |
+| 7 | 取得行の整合性 | 不正な型/状態/金額/tenant/id等 | 500 / INTERNAL_ERROR |
+| 8 | 業務認可 | §4の明示許可に該当しない | 404 / EXPENSE_NOT_FOUND |
+| 9 | 許可項目の応答生成 | 許可 | 200、成功JSON |
+| 各段階 | 一般例外 | プログラム不具合・予期しない内部例外 | 500 / INTERNAL_ERROR |
+
+- `scopes`は文字列配列。完全一致で照合し、`expenses:read-extra`や大小文字違いを許可しない。
+- 非GETは主体種別・users・ID・expenses・業務認可より前に終了する。serviceのPOSTでも認証/scope通過後は405。HEADがFrameworkによりGET handlerへ自動dispatchされても、**元のmethod**を使いこの順序を守る。
+- 段階1で認証アダプターの結果種別と成功結果の構造を検証する。正規の未認証結果は401、不正な結果・成功結果の必須フィールド型不正・未定義kindは内部契約違反として500にする案。正規の成功結果だけを段階2のscopeへ渡す。正規のservice主体はscope通過後の非GETなら段階3で405、GETなら段階4で403になる。
+- D1可用性障害は、対象版の公式仕様と実測で分類根拠を定める。SQL構文ミス、欠落table/migration、binding設定ミス、型変換ミス、制約違反を「D1に関係する」だけで503にしない。分類不能の例外は500として残す案。例外messageの文字列だけを外部code決定やログ項目に流用しない。
+- 取得行破損500は新しい具体化案。未知RoleはL1の不正入力ではdeny、D1へのINSERT/UPDATEでは制約拒否、取得アダプターの破損行注入では500とし、試験層を混ぜない。
+- 取得したuserの構造を検証してからactiveを評価する。expensesのtenant/idが取得条件と一致しない異常も500として扱い、別tenant行を利用しない。正常な「別tenantにしか存在しない」はSELECT結果0行による404。
+- 1回の正常GETにつきアプリ側のusers取得1回・expenses取得1回を基本とする。アプリ側で無断の再試行・権限キャッシュ・所有者現在部署の追加取得を導入しない。D1内部の再試行はアプリ取得回数と分離し、対象版で記録する。呼出し回数と未到達段階を受入条件で確認する。
+- 同一要求中の並行権限変更を即時取消する保証は置かない。「変更の完了後に始めた次要求で再取得」を今回の鮮度契約とする。
+
+## 3. 応答契約と共通finalizer（A2）
+
+### 3.1 JSON
+
+成功例:
+
+```json
+{"id":"R-1001","ownerId":"E-301","amountMinor":12000,"currency":"JPY","status":"PENDING"}
+```
+
+error例（`<server-request-id>`は要求ごとの値を表す記法）:
+
+```json
+{"error":{"code":"EXPENSE_NOT_FOUND","requestId":"<server-request-id>"}}
+```
+
+JSONはキー順を問わず、値・型・許可キー集合を厳密に比較する。成功にtenant/department/role/active/issuer/subject/requestIdを追加しない。errorにmessage、SQL、stack、例外オブジェクト、対象のowner/部署/状態を追加しない。
+
+不存在・別tenantのみ存在・業務閲覧対象外は同じ404、code、JSON形、共通ヘッダー。requestIdの値は異なってよい。応答時間を含む完全な非識別性はこの契約の保証ではない。
+
+### 3.2 ヘッダーの具体化案
+
+| 応答 | アプリが設定するヘッダー |
+|---|---|
+| 全routeの全最終応答 | `Cache-Control: no-store`、`X-Request-Id: <server-request-id>` |
+| JSONを返す応答 | `Content-Type: application/json; charset=UTF-8`（media type/charsetは大小文字を正規化して検査） |
+| 401 | `WWW-Authenticate: Bearer realm="expense-api"` |
+| scope不足403 | `WWW-Authenticate: Bearer realm="expense-api", error="insufficient_scope", scope="expenses:read"` |
+| 405 | `Allow: GET` |
+| HEAD | その終了結果のヘッダーを維持し、本文を0 bytesにする。JSON表現のContent-Typeは維持する案 |
+
+401ではこのPoCがToken暗号検証をしないため、期限切れ・署名不正等を判定したような `invalid_token` / `error_description` を付けない。Bearerのrealm具体値とscope不足403のchallengeは今回の提案。その他の403、404、400、500、503には本案では追加challengeを付けない。Allowは405で付け、他の終了結果に自動流用しない。
+
+requestIdは入力 `X-Request-Id` を採用せずサーバーで生成する。同一要求のheader/error JSON/終端ログで同じ値、異なる要求で異なる値とする。形式は非空の安全な不透明IDとし、認証や認可の根拠にはしない。成功JSONの5項目には入れない。
+
+### 3.3 全route共通finalizer
+
+成功、早期拒否、未知route、捕捉した例外に対して、共通ヘッダー・HEAD本文除去・必要な終端イベントを一か所の共通処理で適用する案。具体的な関数名・middleware配置は調査時に選ぶ。Honoの通常エラー処理やHEAD自動処理がこの契約を迂回しないことを試験する。
+
+アプリ側ではContent-Lengthを固定しない。runtimeが付与する転送関連ヘッダーの完全な集合は契約に固定せず、HEADで実本文が送信されないことを検査する。
+
+Worker呼出し前の拒否、プロセス停止等でアプリがResponseを作れない障害は、共通finalizerで処理済みと扱わない。HEADの503本文除去は合成finalizer試験で確認し、D1前に405で終了する通常HEADのHTTP到達実績とは分ける。
+
+## 4. 認証境界と業務認可
+
+### 4.1 認証と現在権限の正本（既決）
+
+| 境界 | 情報 | 用途 |
+|---|---|---|
+| テスト専用認証アダプター | issuer、subject、scopes、kind（user/service） | 外部主体識別・scope・主体種別 |
+| 要求ごとのD1 users取得 | user_id、tenant_id、role、department、active | 内部利用者・現在のtenant/業務権限 |
+| tenant限定取得したexpenses | tenant_id、id、owner_id、department、amount_minor、currency、status | 対象・申請時部署・状態・返却項目 |
+
+外部IDは(issuer,subject)の組で完全一致照合する。subject単独・email・任意のtenant/role/userヘッダーで結合/上書きしない。初回は**1内部利用者につき1 tenant・1外部ID**。異なるissuerの同subjectを別利用者へ対応付けるfixtureは、同一人物の複数IdP統合を実装する意味ではない。
+
+通常Workerは保護routeで常に認証拒否。Authorizationなし、偽Bearer、任意の主体/tenant/role headerを提示しても401。通常入口へモック切替を追加しない。成功は隔離した検証用入口で認証アダプターを注入し、通常と共通の取得・認可・応答処理を通す。通常bundleへのモック・fault混入を受入条件で検査する。
+
+### 4.2 認可表（既決）
+
+有効user・必要scope・同tenant・妥当な行が前提。
+
+| 閲覧者 | 自分 PENDING | 自分 APPROVED | 自分 REJECTED | 他人・同部署 PENDING | 他人・同部署 APPROVED/REJECTED | 他人・別部署 全状態 |
+|---|---|---|---|---|---|---|
+| EMPLOYEE | 許可 | 許可 | 許可 | 拒否 | 拒否 | 拒否 |
+| MANAGER | 許可 | 許可 | 許可 | 許可 | 拒否 | 拒否 |
+
+同tenantの確認を、所有者判定より前に必要条件として置く。未知Role/ADMINに権限を追加しない。service主体はroleではなくkindで拒否する。
+
+**明示承認済み部署ルール:** MANAGERの現在の `users.department` と、申請時に保存された `expenses.department` を比較する。所有者の異動だけでは既存申請部署を変更しない。自分の申請には部署一致条件を付けない。
+
+現在のrole/department/active/tenantを要求ごとに取得し、変更完了後の次要求で反映する。参照中ownerのtenant変更は§5のFK案により禁止され得るため、tenant鮮度は所有申請のないviewerで試す。
+
+## 5. D1モデルと保証
+
+users/expensesの2表、生SQL。ORM、承認履歴、version、複数外部ID対応表は今回追加しない。列は以下ですべてNOT NULL。
+
+| 表 | 必須列 |
+|---|---|
+| users | user_id、tenant_id、issuer、subject、role、department、active |
+| expenses | tenant_id、id、owner_id、department、amount_minor、currency、status |
+
+### 5.1 別々に検証する3保証（既決）
+
+| 保証 | 手段 | 防ぐもの |
+|---|---|---|
+| 読み出し時tenant分離 | expensesのWHERE条件に現在の `tenant_id` と `id` をbind | 他tenant行を取得して後から隠す実装 |
+| 保存時の同tenant所有者 | expenses(tenant_id,owner_id) → users(tenant_id,user_id) 複合FK | T1の申請がT2所有者を参照する不整合 |
+| tenant内申請ID一意 | expenses PRIMARY KEY(tenant_id,id) | 同tenant・同idの複数行 |
+
+別tenantで同じidが存在することは許可する。PK/FKがあってもtenant限定SELECTを省略しない。
+
+### 5.2 具体的キーと制約の提案（A3）
+
+- users: `PRIMARY KEY(user_id)`（全体で一意）、`UNIQUE(issuer,subject)`、`UNIQUE(tenant_id,user_id)`。
+- expenses: `PRIMARY KEY(tenant_id,id)`、上記の同tenant複合FK。
+- FKは `ON UPDATE RESTRICT / ON DELETE RESTRICT`。参照中usersのuser_id/tenant_id変更や削除を拒否し、自動cascadeで申請を移動/削除しない。非キーのrole/department/active変更は許可。
+- issuer/subjectおよび識別子は大小文字を勝手に正規化せず、case-sensitiveな比較/一意性を用いる案。issuerのネットワーク接続やdiscoveryはしない。
+- roleはEMPLOYEE/MANAGER、activeは保存値0/1、statusはPENDING/APPROVED/REJECTED、currencyはJPY。
+- amount_minorは保存型が整数、範囲0〜9007199254740991。activeも保存型が整数で0/1。INTEGER宣言だけで保証したとしない。SQLiteの型affinityによる変換後の保存型・値を検査する。整数へ変換される数値文字列まで一律拒否するという未決要件は追加しない。
+- 複合PKの列にも明示NOT NULL。その他必須列のNULLも拒否する。
+- APIのID正規表現をDBにも重複実装することは必須にしない。DB由来行のID/型/値は§2で検証する。文字列長等の新しい業務制約は今回追加しない。
+- users全体PKを選ぶ場合でも、複合FKの親側列組に対応する複合UNIQUEを設ける。これは3保証の置き換えではなく、SQLiteでその関係を実現するための具体化案。
+
+DDL構文、型変換・範囲境界・FK enforcement・RESTRICTの実動作はlocal D1で**未検証**。通常制約を外して未知Roleや破損行をfixtureへ保存しない。
+
+## 6. 調査範囲と後続工程
+
+配置は `services/expense-api/`、npm単独＋package-lock。手書き相当200行は分割目安で、必要な試験を削らない。既存ハーネスの全面移植をしない。
+
+Workers/Hono/D1/Vitestは評価候補。Node/npm/TypeScript/Wrangler/lintを含め、Issueに残る版は調査時に公式metadata・engines・peer・使用APIと再照合する。peer無視による成功扱いをしない。
+
+**仕様・受入条件の固定 → 追加調査Issue → 独立ブランチでローカル実測 → 別セッション・別モデルの独立レビュー → PR → Issue #3で所有者の採用判断。**
+
+追加調査Issueは未起票。固定後に存在を再照合し、未起票なら#1のnative sub-issueとして作成、#3から参照する。予定番号を推測しない。文書全文をIssueへ二重管理せず、決定状態・理由・残課題と固定commitを参照する。
+
+| 既存Issue | 固定後の同期内容 |
+|---|---|
+| #1 | 現在の段階、固定commit、調査子Issueと後続順序 |
+| #2 | 配置/npm/lockfile/分割・独立レビュー方針。版は評価結果参照 |
+| #3 | 評価条件と調査参照。技術採用は所有者判断までopen/未決 |
+| #4 | 本書§1〜§3の契約参照と承認範囲 |
+| #5 | 本書§4の境界、通常/L4の隔離・保証範囲 |
+| #6 | 認可表・部署の既決・D1具体案とfixture |
+| #7 | 受入条件の固定commit、必須ケース・NOT_RUN・未確認 |
+
+現在のIssue #1〜#7は2026-10-17作成時の未決案のまま、コメント0件。旧選択肢は本人の後続決定を取り消さない。この改訂ではIssueの完了チェック・採用状態を更新していない。
+
+調査報告完了、必須試験PASS、技術採用、API本体への移行は別判定。仕様レビューとこの会話内の分担チェックを、実装後の別セッション・別モデルによる独立コードレビューへ換算しない。
+
+対象はローカル・架空データのみ。実IdP、実Token暗号検証、BFF、Native、承認/更新API、クラウド公開、remote D1、`refs/tmp/`変更は範囲外。D1は--localを明示しremote bindingを使わず、起動はloopback。fixtureの管理用DB変更を更新APIへ広げない。
+
+## 7. 参照資料と確認範囲
+
+以下は仕様レビューの参考。製品の採用・実装・実測の証拠ではない。具体的なバージョンでの使用経路は調査時に照合する。
+
+- [RFC 9110 §9.3.2、§10.2.1、§15.5.2/6](https://www.rfc-editor.org/rfc/rfc9110.html): HEADの本文禁止、405のAllow、401のchallenge。HEADを今回の保護routeで405とするのは既存のPoC契約。
+- [RFC 6750 §3〜§3.1](https://www.rfc-editor.org/rfc/rfc6750.html): Bearer challengeとscope不足。内部業務エラーcodeは本PoCの提案でありRFCのcodeそのものではない。
+- [SQLite Foreign Keys](https://www.sqlite.org/foreignkeys.html): 複合外部キーと親側一意キー、参照更新/削除の動作。
+- [SQLite Datatypes](https://www.sqlite.org/datatype3.html): 型affinityと保存型。local D1の実測を代替しない。
+- [Cloudflare D1 Foreign keys](https://developers.cloudflare.com/d1/sql-api/foreign-keys/): D1におけるFKの扱い。
