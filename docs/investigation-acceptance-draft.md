@@ -1,8 +1,8 @@
-# PoC追加調査の受入条件案（DRAFT・全件NOT_RUN）
+# PoC追加調査の受入条件案（A4/A5承認済み・正式固定未実施・全件NOT_RUN）
 
-改訂: 2026-10-18（JST）。[仕様案](poc-specification-draft.md)の固定候補に対応する。旧版 `b297e727d5087d71b26a6ea1f4eca4cf226f44c4` のH01〜H19を追跡可能にし、不足を具体化した。**文書レビューのみ。コード・DDL・migration・試験実行・実測は未実施。**
+改訂: 2026-10-19（JST）。現在状態と参照だけを同期し、fixture・ケース・期待値・合格条件は維持。[仕様案](poc-specification-draft.md)の固定候補に対応する。旧版 `b297e727d5087d71b26a6ea1f4eca4cf226f44c4` のH01〜H19を追跡可能にし、不足を具体化した。**文書レビューのみ。コード・DDL・migration・試験実行・実測は未実施。**
 
-本書のfixture・期待値は仕様案A4、試験範囲・観測・ログ・再現性はA5の承認待ち。route/応答/DB制約は仕様案A1〜A3の承認に従う。理解確認Q3のbundle成功・通常401・Vitest200は設問上の仮定であり、本書の実測結果ではない。
+本書のfixture・期待値はA4、試験範囲・観測・ログ・再現性はA5として2026-10-18に明示承認済み（仕様案§0.1・§0.2）。route/応答/DB制約は承認済みA1〜A3に従う。最新台帳・承認内容の接続と固定候補は仕様案§0・§0.3を参照する。文書一式の正式固定・Issue反映は未実施で、個別承認は取り直さない。理解確認Q3のbundle成功・通常401・Vitest200は設問上の仮定であり、本書の実測結果ではない。
 
 ## 1. 試験層・状態・独立期待値
 
@@ -26,7 +26,7 @@ L2の200＋L3の401でL4を合格にしない。L2でworkerdを使っている�
 
 期待値は以下の固定表/定数から作り、認可関数や応答mapperを呼んで生成しない。型/schemaの一致と具体的値の一致を両方確認する。表のパラメータ化ケースは指定した全値を展開し、個別case IDと結果を残す。aliasの重複実行は必須にせず、同じ観測へ複数の要求IDを対応付けてよい。
 
-全HTTPケースには仕様案§3のheaders/JSON/HEAD/requestId、§8のDB不変性、§9の終端ログを適用する。ただしD1等を使わないL1/componentにはHTTP/DB観測を要求しない。観測範囲は実行層ごとに記録する。
+全HTTPケースには仕様案§3のheaders/JSON/HEAD/requestId、本書§8のDB不変性、本書§9の終端ログを適用する。ただしD1等を使わないL1/componentにはHTTP/DB観測を要求しない。観測範囲は実行層ごとに記録する。
 
 ## 2. 完全な架空fixtureと独立JSON期待値（A4）
 
@@ -48,7 +48,7 @@ A=`https://issuer-a.example.invalid`、B=`https://issuer-b.example.invalid`。DB
 
 追加identity定数: UNA=正規の未認証結果、SVC=`{issuer:A,subject:"service-fixture",scopes:["expenses:read"],kind:"service"}`、ABS=`{issuer:A,subject:"absent-user",scopes:["expenses:read"],kind:"user"}`。scope不足は対応identityのscopesだけを指定値へ変更する。
 
-UNA・成功identity・SVC/ABSは仕様上の入力定数。認証アダプターの引数・戻り値の外側表現は仕様案§4.1のA2補足案に従って調査時に定義し、これらの定数と§6.3のAUTH-shapeを同じ具体型へ対応付けて記録する。外側表現の選択で401/500の分類や認証から採用する4項目を変えない。2026-10-18の補足はこの委任範囲の明示であり、fixture行・ケース・期待値の追加変更ではない。
+UNA・成功identity・SVC/ABSは仕様上の入力定数。認証アダプターの引数・戻り値の外側表現は仕様案§4.1の承認済みA2-5の委任範囲に従って調査時に定義し、これらの定数と§6.3のAUTH-shapeを同じ具体型へ対応付けて記録する。外側表現の選択で401/500の分類や認証から採用する4項目を変えない。2026-10-18の補足はこの委任範囲の明示であり、fixture行・ケース・期待値の追加変更ではない。
 
 M-102は所有申請なし。tenant変更でowner-FKを破壊しないためのviewer。E-303はEMPLOYEEの他人・同部署拒否用。
 
@@ -322,7 +322,7 @@ entrypoint/auxiliary Workerの具体方式は調査で選ぶ。通常共通コ�
 
 ### 7.3 H19を展開したL4必須ケース
 
-全ケースは§2のbaseline、仕様案§3のheadersと§9のログを使用し、設定同等性とartifact対応の証跡へ結び付ける。
+全ケースは本書§2のbaseline、仕様案§3のheadersと本書§9のログを使用し、設定同等性とartifact対応の証跡へ結び付ける。
 
 | case | 入力/障害 | 期待HTTP/JSON・後続 |
 |---|---|---|
@@ -372,7 +372,7 @@ snapshot等値が保証するのは観測前後の状態一致。途中に一度
 | expenses可用性障害 | expense_lookup | unavailable | 503 |
 | 一般例外/破損行/不正adapter出力 | internal | error | 500 |
 
-HEADでも同じ終端段階を記録し、headerのridで対応する。ログ0件や二重終端イベントはFAIL。raw capture不能ならNOT_OBSERVED/BLOCKED。イベント名・enum・1件ルールは新しい具体化案で、まだ正式承認されていない。
+HEADでも同じ終端段階を記録し、headerのridで対応する。ログ0件や二重終端イベントはFAIL。raw capture不能ならNOT_OBSERVED/BLOCKED。イベント名・enum・1件ルールはA5として2026-10-18に明示承認済み（仕様案§0.2）。文書一式の正式固定と実測は未実施。
 
 ### 9.2 合成ラベルの具体試験
 
@@ -419,7 +419,7 @@ mask後の画面だけではなく、対象経路のraw観測から判定する�
 
 **固定 → 追加調査Issue（未起票なら#1のnative sub-issue、#3参照） → 独立ブランチのローカル実測 → 別セッション・別モデルの独立レビュー → PR → Issue #3で所有者判断。**
 
-現在のレビューはこの最初の固定準備。全体PoCや実IdP/BFF/Nativeを調査開始の追加必須ゲートにしない。仕様固定、Issue起票、コード実装の承認は現在まだ行われていない。
+現在はA1〜A5の個別承認を終え、2文書一式の正式固定対象を提示して固定作業・Issue反映の指示範囲を確認する段階。全体PoCや実IdP/BFF/Native、補助ツール導入を調査開始の追加必須ゲートにしない。仕様の正式固定、Issue反映・追加起票、コード実装は未実施であり、表記同期から自動実行しない。
 
 ### 一次資料（仕様レビューで参照・実測の代替ではない）
 
