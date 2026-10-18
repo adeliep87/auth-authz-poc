@@ -24,11 +24,11 @@
 | A4 | 完全なfixture、認可表との対応、独立した具体的HTTP/JSON/DB期待値 | 受入条件案§2〜§6 |
 | A5 | L1〜L4の必須範囲、設定・artifact照合、障害注入、DB不変性、ログと再現性の合格条件 | 受入条件案§1・§7〜§10 |
 
-**A1・A2は本人承認済み（2026-10-18 JST）。** A1は内容commit `18650f135f103ccfdf4574365dc25aed314f82f1` §1に対し§1.3で記録。A2は同内容commitの§2〜§3・§4.1に対し§4.1直後の承認理由記録を参照。**A3〜A5は未承認**。A1・A2の承認は仕様／受入条件全体の正式固定、技術採用、API本体移行、実装・試験開始を意味しない。
+**A1・A2・A3は本人承認済み（2026-10-18 JST）。** A1は内容commit `18650f135f103ccfdf4574365dc25aed314f82f1` §1に対し§1.3で記録。A2は同内容commitの§2〜§3・§4.1に対し§4.1直後の承認理由記録を参照。**A4・A5は未承認**。A1〜A3の承認は仕様／受入条件全体の正式固定、技術採用、API本体移行、実装・試験開始を意味しない。
 
 正式固定時は、この2文書を含む**対象commitの完全SHA**、本人の明示承認原文または所在、承認日時（JST）、承認したA番号・節、除外/保留、残る未確認事項を記録する。承認は対象commitの内容に結び付け、承認記録を追記した次commitから元commitを参照する。未承認欄を自動で埋めない。承認後の意味変更は差分と影響ケースを示して再レビューする。
 
-現在: 内容commit `18650f135f103ccfdf4574365dc25aed314f82f1` の**A1・A2のみ承認**（§1.3・§4.2）／仕様・受入条件全体の正式固定 **未承認**／A3〜A5の本人承認原文 **なし**／試験 **NOT_RUN**／技術採用 **未決**。
+現在: 内容commit `18650f135f103ccfdf4574365dc25aed314f82f1` の**A1・A2・A3のみ承認**（§1.3・§4.1.1・§5.3）／仕様・受入条件全体の正式固定 **未承認**／A4・A5の本人承認原文 **なし**／試験 **NOT_RUN**／技術採用 **未決**。
 
 ## 1. 対象APIとroute境界
 
@@ -230,6 +230,22 @@ users/expensesの2表、生SQL。ORM、承認履歴、version、複数外部ID�
 - users全体PKを選ぶ場合でも、複合FKの親側列組に対応する複合UNIQUEを設ける。これは3保証の置き換えではなく、SQLiteでその関係を実現するための具体化案。
 
 DDL構文、型変換・範囲境界・FK enforcement・RESTRICTの実動作はlocal D1で**未検証**。通常制約を外して未知Roleや破損行をfixtureへ保存しない。
+
+### 5.3 A3-1〜A3-5の本人承認・採用理由（2026-10-18 JST）
+
+**本人の明示承認原文**：「A3の判断は次のとおりです。A3-1 usersのPK・UNIQUE：承認／A3-2 expensesの複合PK・複合FK：承認／A3-3 FKのRESTRICT：承認／A3-4 role・active・status・金額等の値制約：承認／A3-5 保存型・NOT NULL：承認。承認した項目は採用理由とともにGitHubに記録してください。A4・A5は未承認のままにしてください。」
+
+**対象内容**：commit `18650f135f103ccfdf4574365dc25aed314f82f1` §5.1〜§5.2。後続のA1承認記録commit `4f85159d61d00f7e7e1fea62fef5f2754c350303`、A2承認記録commit `71a8b244b9cfc4838f9e4dec89537554049a21f9` は§5のDB契約を変更していない。以下は§5の採用理由であり、実測に基づくDDL承認や追加要件ではない。
+
+| 判断 | 採用理由・留意点 |
+|---|---|
+| A3-1 usersのPKとUNIQUE | `user_id` の全体一意性、`(issuer,subject)` の外部主体一意性を独立して保証。`UNIQUE(tenant_id,user_id)` は全体PKと論理的に冗長でも、SQLiteの複合FKが参照する親キーの列組に対応する一意制約として設ける。 |
+| A3-2 expensesの複合PKと複合FK | `PRIMARY KEY(tenant_id,id)` は同tenant内の申請ID重複を拒否し、異なるtenantでの同IDを許す。`(tenant_id,owner_id)→users(tenant_id,user_id)` は別tenantのownerを保存時に拒否する。これらは取得時のtenant限定SELECT／API業務認可を代替しない。 |
+| A3-3 FKのRESTRICT | 参照中の親userのキー変更・削除を拒否し、CASCADEで申請が意図せず移動／削除されることを防止。role・department・active等の非キー変更は可能で、異動・退職等の将来業務仕様を新規決定したわけではない。 |
+| A3-4 値の制約 | 許容role=EMPLOYEE/MANAGER、active=0/1、status=PENDING/APPROVED/REJECTED、currency=JPY、amount_minorは非負のJS安全整数範囲とし、APIを通らない書込みでも業務上無効なデータを拒否する。ADMIN権限や追加通貨は作らない。 |
+| A3-5 保存型とNOT NULL | SQLiteのINTEGER宣言と実保存型を混同せず、active／amount_minorの格納型・値を検査する。複合PK列を含む必須列に明示NOT NULLを適用する。SQLiteの型変換で適法な整数として保存される数値文字列を入力文字列だっただけで一律拒否する追加要件は置かない。 |
+
+**状態**：A1〜A3は承認済み、**A4・A5は未承認**。仕様／受入条件全体の正式固定・実装・試験・技術採用は未実施。D1実機におけるDDL・FK enforcement・RESTRICT・CHECK・型変換の実動作は**NOT_RUN**であり、正式採用判定ではない。承認範囲に意味変更があれば対象差分を示して再承認する。
 
 ## 6. 調査範囲と後続工程
 
