@@ -1,6 +1,6 @@
 # Expense API PoC 仕様案（DRAFT・正式固定は未承認）
 
-改訂: 2026-10-17（JST）。レビュー対象の旧版は `b297e727d5087d71b26a6ea1f4eca4cf226f44c4`。本書と[調査受入条件案](investigation-acceptance-draft.md)を一組としてレビューする。コード・migration・依存導入・実測は未実施、受入試験はすべて **NOT_RUN**。
+改訂: 2026-10-18（JST）。初回レビューの基点は `b297e727d5087d71b26a6ea1f4eca4cf226f44c4`、今回の再照合・補足の基点はレビュー済みDRAFT `7ee8df448b9d8044cfe4716e5871b9fc14b29209`。本書と[調査受入条件案](investigation-acceptance-draft.md)を一組としてレビューする。コード・migration・依存導入・実測は未実施、受入試験はすべて **NOT_RUN**。
 
 ## 0. 根拠・承認状態・固定方法
 
@@ -12,14 +12,14 @@
 | 本人の追加明示承認 | MANAGER現在部署と申請保存部署の比較、所有者の異動では既存申請部署を変更しない | 維持。自己申請に同部署条件を追加しない |
 | 以前のレビュー補足 | 一般例外500、Allow、requestIdの配置と対応、通常条件の認証後経路 | 仕様案へ統合。理解確認の正答を正式承認にしない |
 | 今回の具体化案 | route境界・未デコードID、共通finalizer、各code/ヘッダー、破損行の500、usersの具体的キー、fixture・受入詳細 | 下記A1〜A5の承認待ち |
-| 調査時の実装選択 | DDLの記法、テスト専用entrypoint/auxiliary Worker、初期化・artifact検査・fault注入の方式、依存版 | 固定した要件の下で調査。未測定の方式や版を採用済みとしない |
+| 調査時の実装選択 | 認証アダプターの引数・戻り値の外側表現（§4.1のA2補足案）、DDLの記法、テスト専用entrypoint/auxiliary Worker、初期化・artifact検査・fault注入の方式、依存版 | 固定した要件の下で調査。未測定の方式や版を採用済みとしない |
 
 ### 正式固定前の承認項目
 
 | ID | 承認対象の案 | 参照 |
 |---|---|---|
 | A1 | 未知routeと保護routeの境界、未デコードID、末尾slash・queryの扱い | §1 |
-| A2 | エラーコードと応答JSON/headers、全route共通finalizer、主体/行破損/例外の分類 | §2〜§3 |
+| A2 | エラーコードと応答JSON/headers、全route共通finalizer、主体/行破損/例外の分類、認証結果の必須型と表現の委任範囲 | §2〜§3・§4.1 |
 | A3 | users全体PK・複合UNIQUE、複合FKのRESTRICT、保存型を含む具体的DB制約 | §5 |
 | A4 | 完全なfixture、認可表との対応、独立した具体的HTTP/JSON/DB期待値 | 受入条件案§2〜§6 |
 | A5 | L1〜L4の必須範囲、設定・artifact照合、障害注入、DB不変性、ログと再現性の合格条件 | 受入条件案§1・§7〜§10 |
@@ -144,6 +144,10 @@ Worker呼出し前の拒否、プロセス停止等でアプリがResponseを作
 | テスト専用認証アダプター | issuer、subject、scopes、kind（user/service） | 外部主体識別・scope・主体種別 |
 | 要求ごとのD1 users取得 | user_id、tenant_id、role、department、active | 内部利用者・現在のtenant/業務権限 |
 | tenant限定取得したexpenses | tenant_id、id、owner_id、department、amount_minor、currency、status | 対象・申請時部署・状態・返却項目 |
+
+**認証結果型の補足案（A2・2026-10-18、未承認）:** 成功結果の必須型は `issuer: string`、`subject: string`、`scopes: string[]`、`kind: "user" | "service"` とする。正規の未認証結果と成功結果を区別できる一つの戻り値型を設ける。アダプターの引数、未認証を表す値またはtag、成功結果の外側の構造は、調査時に一つの具体的な型として定義・記録する実装選択とする。認証出力から採用する情報は上表の4項目に限り、現在の業務権限を付加情報から採用しない。
+
+元の準備記録§3.4の「具体的な入出力の型は仕様案作成時に定義する」に対し、本補足は**必須フィールドの型をここで示し、引数・外側表現の決定を調査へ委任する提案**である。受入fixtureのUNA・成功identity・AUTH-shapeをその具体型へ対応付け、調査コードのREADMEから型定義・fixtureを参照できるようにする。正規の未認証結果は401、結果種別不正・成功結果の必須フィールド欠落/型不正・未定義kindは§2の500とし、不正出力を未認証へ丸めない。既存のHTTP期待値・認可条件・ケース数は変更しない。
 
 外部IDは(issuer,subject)の組で完全一致照合する。subject単独・email・任意のtenant/role/userヘッダーで結合/上書きしない。初回は**1内部利用者につき1 tenant・1外部ID**。異なるissuerの同subjectを別利用者へ対応付けるfixtureは、同一人物の複数IdP統合を実装する意味ではない。
 

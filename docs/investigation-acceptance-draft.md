@@ -1,6 +1,6 @@
 # PoC追加調査の受入条件案（DRAFT・全件NOT_RUN）
 
-改訂: 2026-10-17（JST）。[仕様案](poc-specification-draft.md)の固定候補に対応する。旧版 `b297e727d5087d71b26a6ea1f4eca4cf226f44c4` のH01〜H19を追跡可能にし、不足を具体化した。**文書レビューのみ。コード・DDL・migration・試験実行・実測は未実施。**
+改訂: 2026-10-18（JST）。[仕様案](poc-specification-draft.md)の固定候補に対応する。旧版 `b297e727d5087d71b26a6ea1f4eca4cf226f44c4` のH01〜H19を追跡可能にし、不足を具体化した。**文書レビューのみ。コード・DDL・migration・試験実行・実測は未実施。**
 
 本書のfixture・期待値は仕様案A4、試験範囲・観測・ログ・再現性はA5の承認待ち。route/応答/DB制約は仕様案A1〜A3の承認に従う。理解確認Q3のbundle成功・通常401・Vitest200は設問上の仮定であり、本書の実測結果ではない。
 
@@ -47,6 +47,8 @@ A=`https://issuer-a.example.invalid`、B=`https://issuer-b.example.invalid`。DB
 「identity=E-301」等はその行のissuer/subject、`scopes=["expenses:read"]`、`kind="user"`を認証アダプターから注入する略記。user_id/tenant/role/department/activeを認証から注入する意味ではない。
 
 追加identity定数: UNA=正規の未認証結果、SVC=`{issuer:A,subject:"service-fixture",scopes:["expenses:read"],kind:"service"}`、ABS=`{issuer:A,subject:"absent-user",scopes:["expenses:read"],kind:"user"}`。scope不足は対応identityのscopesだけを指定値へ変更する。
+
+UNA・成功identity・SVC/ABSは仕様上の入力定数。認証アダプターの引数・戻り値の外側表現は仕様案§4.1のA2補足案に従って調査時に定義し、これらの定数と§6.3のAUTH-shapeを同じ具体型へ対応付けて記録する。外側表現の選択で401/500の分類や認証から採用する4項目を変えない。2026-10-18の補足はこの委任範囲の明示であり、fixture行・ケース・期待値の追加変更ではない。
 
 M-102は所有申請なし。tenant変更でowner-FKを破壊しないためのviewer。E-303はEMPLOYEEの他人・同部署拒否用。
 
